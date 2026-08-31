@@ -191,9 +191,12 @@ jobs:
 
       - name: Desplegar con Helm
         run: |
+          # Convertimos el nombre del repositorio a minúsculas igual que en el build de Docker
+          REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+
           helm upgrade --install chasqui-retail ./helm/chasqui-retail \
             --namespace staging \
-            --set image.repository=ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }} \
+            --set image.repository=ghcr.io/$REPO_LOWER \
             --set image.tag=${{ needs.build-and-push.outputs.image_tag }} \
             --wait --timeout 3m
 
