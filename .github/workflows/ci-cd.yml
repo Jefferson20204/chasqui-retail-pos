@@ -131,6 +131,13 @@ jobs:
     # Solo se construye y publica la imagen si el cambio ya está en main
     # (es decir, ya fue aprobado y fusionado), no en cada Pull Request.
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    # Indica a GitHub que aumente temporalmente los privilegios
+    # del token mientras procesa la imagen Docker.
+    permissions:
+      contents: read
+      packages: write
+
     outputs:
       image_tag: ${{ steps.vars.outputs.image_tag }}
     steps:
