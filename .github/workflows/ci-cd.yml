@@ -235,38 +235,46 @@ jobs:
       - name: Descargar el código del repositorio
         uses: actions/checkout@v4
 
-      - name: Configurar acceso al clúster de Kubernetes
-        uses: azure/k8s-set-context@v4
-        with:
-          method: kubeconfig
-          kubeconfig: ${{ secrets.KUBE_CONFIG_PRODUCTION }}
-
-      - name: Instalar Helm
-        uses: azure/setup-helm@v4
-
-      - name: Desplegar con Helm
+      - name: Simulación de Despliegue en Kubernetes Producción
         run: |
-          helm upgrade --install chasqui-retail ./helm/chasqui-retail \
-            --namespace production \
-            --set image.repository=ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }} \
-            --set image.tag=${{ needs.build-and-push.outputs.image_tag }} \
-            --wait --timeout 3m
+          echo "=== MODO DISEÑO: Simulando conexión al clúster de producción ==="
+          echo "Usando KUBE_CONFIG_PRODUCTION (Omitido por falta de infraestructura)"
+          echo "Ejecutando: helm upgrade --install chasqui-retail ./helm/chasqui-retail --namespace production"
+          echo "Imagen a desplegar: ghcr.io/$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]'):${{ needs.build-and-push.outputs.image_tag }}"
+          echo "=== Despliegue de producción simulado con éxito ==="
 
-      - name: Smoke test contra Producción
-        id: smoke_test
-        run: curl --fail https://app.chasquiretail.pe/health
+      # Se dejan los pasos reales comentados para futura implementación:
+      # - name: Configurar acceso al clúster de Kubernetes
+      #   uses: azure/k8s-set-context@v4
+      #   with:
+      #     method: kubeconfig
+      #     kubeconfig: ${{ secrets.KUBE_CONFIG_PRODUCTION }}
 
-      # Si el smoke test falla, se revierte automáticamente a la versión anterior.
-      - name: Rollback automático ante fallo
-        if: failure() && steps.smoke_test.outcome == 'failure'
-        run: helm rollback chasqui-retail --namespace production
+      # - name: Instalar Helm
+      #   uses: azure/setup-helm@v4
+
+      # - name: Desplegar con Helm
+      #   run: |
+      #     helm upgrade --install chasqui-retail ./helm/chasqui-retail \
+      #       --namespace production \
+      #       --set image.repository=ghcr.io/$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]') \
+      #       --set image.tag=${{ needs.build-and-push.outputs.image_tag }} \
+      #       --wait --timeout 3m
+
+      # - name: Smoke test contra Producción
+      #   id: smoke_test
+      #   run: curl --fail https://app.chasquiretail.pe/health
+
+      # - name: Rollback automático ante fallo
+      #   if: failure() && steps.smoke_test.outcome == 'failure'
+      #   run: helm rollback chasqui-retail --namespace production
 
       - name: Notificar resultado en Slack (Producción)
-        if: always()
+        if: always() && secrets.SLACK_WEBHOOK_URL != ''
         uses: slackapi/slack-github-action@v2
         with:
-          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
-          webhook-type: incoming-webhook
+          # Sintaxis corregida para v2
+          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
           payload: |
             {
               "text": "Despliegue a *Producción* — commit `${{ needs.build-and-push.outputs.image_tag }}` — resultado: ${{ job.status }}"
