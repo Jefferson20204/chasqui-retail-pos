@@ -270,11 +270,13 @@ jobs:
       #   run: helm rollback chasqui-retail --namespace production
 
       - name: Notificar resultado en Slack (Producción)
-        if: always() && secrets.SLACK_WEBHOOK_URL != ''
+        if: always() && env.SLACK_WEBHOOK_URL != ''
         uses: slackapi/slack-github-action@v2
+        env:
+          # Mapeamos el secreto a una variable de entorno del paso
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         with:
-          # Sintaxis corregida para v2
-          webhook-url: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-url: ${{ env.SLACK_WEBHOOK_URL }}
           payload: |
             {
               "text": "Despliegue a *Producción* — commit `${{ needs.build-and-push.outputs.image_tag }}` — resultado: ${{ job.status }}"
