@@ -1,0 +1,250 @@
+# Ubicación de este archivo dentro del repositorio: .github/workflows/ci-cd.yml
+#
+# Este workflow implementa el pipeline diseñado para Chasqui Retail Perú S.A.C.:
+# Lint -> Pruebas (Jest/Supertest) -> Calidad (SonarQube) -> Build (Docker) ->
+# Publicación de imagen -> Despliegue a Staging (Helm/Kubernetes) -> Aprobación manual ->
+# Despliegue a Producción (Helm/Kubernetes) -> Notificaciones (Slack)
+
+name: CI/CD Chasqui Retail
+
+# --- ETAPA 1: DISPARO DEL PIPELINE ---
+# Se activa automáticamente al hacer push a "develop" o "main", o al abrir un Pull Request.
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop, main]
+
+env:
+  NODE_VERSION: '20'
+  IMAGE_NAME: chasqui-retail-backend
+
+jobs:
+
+  # --- ETAPA 2: INSTALACIÓN DE DEPENDENCIAS Y ANÁLISIS DE CÓDIGO (LINT) ---
+  lint:
+    name: Lint y análisis de estilo
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar el código del repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Instalar dependencias (instalación reproducible)
+        run: npm ci
+
+      - name: Ejecutar ESLint
+        run: npm run lint
+
+  # --- ETAPA 3: PRUEBAS AUTOMATIZADAS (JEST + SUPERTEST) ---
+  test:
+    name: Pruebas unitarias e integración
+    runs-on: ubuntu-latest
+    needs: lint
+    # Se levanta una base de datos PostgreSQL real como servicio del job,
+    # necesaria para las pruebas de integración con Supertest.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: chasqui_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U test_user"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://test_user:test_password@localhost:5432/chasqui_test
+    steps:
+      - name: Descargar el código del repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Ejecutar migraciones sobre la base de datos de prueba
+        run: npm run migrate
+
+      - name: Ejecutar pruebas unitarias (Jest)
+        run: npm run test:unit -- --coverage
+
+      - name: Ejecutar pruebas de integración (Supertest)
+        run: npm run test:integration
+
+      # El reporte de cobertura se guarda como artefacto para que
+      # SonarQube pueda leerlo en el siguiente job.
+      - name: Guardar reporte de cobertura
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+
+  # --- ETAPA 4: ANÁLISIS DE CALIDAD DE CÓDIGO (SONARQUBE) ---
+  code-quality:
+    name: Análisis de calidad (SonarQube)
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - name: Descargar el código del repositorio
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # SonarQube necesita el historial completo de commits
+
+      - name: Descargar reporte de cobertura generado en el job anterior
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+
+      - name: Ejecutar análisis de SonarQube
+        uses: SonarSource/sonarqube-scan-action@v3
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
+      # El pipeline se detiene aquí si el Quality Gate de SonarQube no se cumple.
+      - name: Verificar resultado del Quality Gate
+        uses: SonarSource/sonarqube-quality-gate-action@v1
+        timeout-minutes: 5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  # --- ETAPA 5 y 6: COMPILACIÓN (DOCKER) Y PUBLICACIÓN DE LA IMAGEN ---
+  build-and-push:
+    name: Build y publicación de imagen Docker
+    runs-on: ubuntu-latest
+    needs: code-quality
+    # Solo se construye y publica la imagen si el cambio ya está en main
+    # (es decir, ya fue aprobado y fusionado), no en cada Pull Request.
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    outputs:
+      image_tag: ${{ steps.vars.outputs.image_tag }}
+    steps:
+      - name: Descargar el código del repositorio
+        uses: actions/checkout@v4
+
+      - name: Definir etiqueta de la imagen (basada en el commit)
+        id: vars
+        run: echo "image_tag=$(echo $GITHUB_SHA | cut -c1-7)" >> "$GITHUB_OUTPUT"
+
+      - name: Iniciar sesión en el registro de contenedores
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Construir y publicar imagen (multi-stage build)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.image_tag }}
+            ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:latest
+
+  # --- ETAPA 7 (STAGING): DESPLIEGUE AUTOMÁTICO CON HELM SOBRE KUBERNETES ---
+  deploy-staging:
+    name: Despliegue a Staging
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    environment: staging
+    steps:
+      - name: Descargar el código del repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar acceso al clúster de Kubernetes
+        uses: azure/k8s-set-context@v4
+        with:
+          method: kubeconfig
+          kubeconfig: ${{ secrets.KUBE_CONFIG_STAGING }}
+
+      - name: Instalar Helm
+        uses: azure/setup-helm@v4
+
+      - name: Desplegar con Helm
+        run: |
+          helm upgrade --install chasqui-retail ./helm/chasqui-retail \
+            --namespace staging \
+            --set image.repository=ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }} \
+            --set image.tag=${{ needs.build-and-push.outputs.image_tag }} \
+            --wait --timeout 3m
+
+      - name: Smoke test contra Staging
+        run: curl --fail https://staging.chasquiretail.pe/health
+
+      - name: Notificar en Slack (Staging)
+        if: always()
+        uses: slackapi/slack-github-action@v2
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": "Despliegue a *Staging* — commit `${{ needs.build-and-push.outputs.image_tag }}` — resultado: ${{ job.status }}"
+            }
+
+  # --- ETAPA 7 (PRODUCCIÓN): DESPLIEGUE CON APROBACIÓN MANUAL ---
+  # El "environment: production" está configurado en GitHub (Settings > Environments)
+  # con "required reviewers", por lo que este job queda pausado hasta que
+  # alguien del equipo lo apruebe manualmente.
+  deploy-production:
+    name: Despliegue a Producción
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    environment: production
+    steps:
+      - name: Descargar el código del repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar acceso al clúster de Kubernetes
+        uses: azure/k8s-set-context@v4
+        with:
+          method: kubeconfig
+          kubeconfig: ${{ secrets.KUBE_CONFIG_PRODUCTION }}
+
+      - name: Instalar Helm
+        uses: azure/setup-helm@v4
+
+      - name: Desplegar con Helm
+        run: |
+          helm upgrade --install chasqui-retail ./helm/chasqui-retail \
+            --namespace production \
+            --set image.repository=ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }} \
+            --set image.tag=${{ needs.build-and-push.outputs.image_tag }} \
+            --wait --timeout 3m
+
+      - name: Smoke test contra Producción
+        id: smoke_test
+        run: curl --fail https://app.chasquiretail.pe/health
+
+      # Si el smoke test falla, se revierte automáticamente a la versión anterior.
+      - name: Rollback automático ante fallo
+        if: failure() && steps.smoke_test.outcome == 'failure'
+        run: helm rollback chasqui-retail --namespace production
+
+      - name: Notificar resultado en Slack (Producción)
+        if: always()
+        uses: slackapi/slack-github-action@v2
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": "Despliegue a *Producción* — commit `${{ needs.build-and-push.outputs.image_tag }}` — resultado: ${{ job.status }}"
+            }
