@@ -16,11 +16,10 @@ on:
     branches: [develop, main]
 
 env:
-  NODE_VERSION: '20'
+  NODE_VERSION: "20"
   IMAGE_NAME: chasqui-retail-backend
 
 jobs:
-
   # --- ETAPA 2: INSTALACIÓN DE DEPENDENCIAS Y ANÁLISIS DE CÓDIGO (LINT) ---
   lint:
     name: Lint y análisis de estilo
@@ -33,7 +32,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
+          cache: "npm"
 
       - name: Instalar dependencias (instalación reproducible)
         run: npm ci
@@ -72,7 +71,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
+          cache: "npm"
 
       - name: Instalar dependencias
         run: npm ci
@@ -103,7 +102,7 @@ jobs:
       - name: Descargar el código del repositorio
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # SonarQube necesita el historial completo de commits
+          fetch-depth: 0 # SonarQube necesita el historial completo de commits
 
       - name: Descargar reporte de cobertura generado en el job anterior
         uses: actions/download-artifact@v4
@@ -130,7 +129,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: code-quality
     # Solo se construye y publica la imagen si el cambio ya está en main
-    # (es decir, ya fue aprobado y fusionado), no en cada Pull Request.
+    # (es decir,ya fue aprobado y fusionado), no en cada Pull Request.
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     outputs:
       image_tag: ${{ steps.vars.outputs.image_tag }}
