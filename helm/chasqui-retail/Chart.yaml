@@ -1,0 +1,6 @@
+apiVersion: v2
+name: chasqui-retail
+description: Helm chart para la API de ventas e inventario de Chasqui Retail
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
