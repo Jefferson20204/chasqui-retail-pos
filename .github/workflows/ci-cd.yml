@@ -180,7 +180,7 @@ jobs:
       - name: Descargar el código del repositorio
         uses: actions/checkout@v4
 
-      - name: [DISEÑO] Simulación de Despliegue en Kubernetes
+      - name: Simulación de Despliegue en Kubernetes
         run: |
           echo "=== MODO DISEÑO: Simulando conexión al clúster ==="
           echo "Usando KUBE_CONFIG_STAGING (Omitido por falta de infraestructura)"
@@ -188,39 +188,39 @@ jobs:
           echo "Imagen a desplegar: ghcr.io/$(echo ${{ github.repository }} | tr '[:upper:]' '[:lower:]'):${{ needs.build-and-push.outputs.image_tag }}"
           echo "=== Despliegue simulado con éxito ==="
 
-      # - name: Configurar acceso al clúster de Kubernetes
-      #   uses: azure/k8s-set-context@v4
-      #   with:
-      #     method: kubeconfig
-      #     kubeconfig: ${{ secrets.KUBE_CONFIG_STAGING }}
+      - name: Configurar acceso al clúster de Kubernetes
+        uses: azure/k8s-set-context@v4
+        with:
+          method: kubeconfig
+          kubeconfig: ${{ secrets.KUBE_CONFIG_STAGING }}
 
-      # - name: Instalar Helm
-      #   uses: azure/setup-helm@v4
+      - name: Instalar Helm
+        uses: azure/setup-helm@v4
 
-      # - name: Desplegar con Helm
-      #   run: |
-      #     # Convertimos el nombre del repositorio a minúsculas igual que en el build de Docker
-      #     REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+      - name: Desplegar con Helm
+        run: |
+          # Convertimos el nombre del repositorio a minúsculas igual que en el build de Docker
+          REPO_LOWER=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
 
-      #     helm upgrade --install chasqui-retail ./helm/chasqui-retail \
-      #       --namespace staging \
-      #       --set image.repository=ghcr.io/$REPO_LOWER \
-      #       --set image.tag=${{ needs.build-and-push.outputs.image_tag }} \
-      #       --wait --timeout 3m
+          helm upgrade --install chasqui-retail ./helm/chasqui-retail \
+            --namespace staging \
+            --set image.repository=ghcr.io/$REPO_LOWER \
+            --set image.tag=${{ needs.build-and-push.outputs.image_tag }} \
+            --wait --timeout 3m
 
-      # - name: Smoke test contra Staging
-      #   run: curl --fail https://staging.chasquiretail.pe/health
+      - name: Smoke test contra Staging
+        run: curl --fail https://staging.chasquiretail.pe/health
 
-      # - name: Notificar en Slack (Staging)
-      #   if: always()
-      #   uses: slackapi/slack-github-action@v2
-      #   with:
-      #     webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
-      #     webhook-type: incoming-webhook
-      #     payload: |
-      #       {
-      #         "text": "Despliegue a *Staging* — commit `${{ needs.build-and-push.outputs.image_tag }}` — resultado: ${{ job.status }}"
-      #       }
+      - name: Notificar en Slack (Staging)
+        if: always()
+        uses: slackapi/slack-github-action@v2
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": "Despliegue a *Staging* — commit `${{ needs.build-and-push.outputs.image_tag }}` — resultado: ${{ job.status }}"
+            }
 
   # --- ETAPA 7 (PRODUCCIÓN): DESPLIEGUE CON APROBACIÓN MANUAL ---
   # El "environment: production" está configurado en GitHub (Settings > Environments)
